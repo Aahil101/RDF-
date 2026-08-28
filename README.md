@@ -115,6 +115,36 @@ python cli.py --provider groq eval           # config C
 
 ---
 
+### Asking about the whole document
+
+Not every question is a lookup. "Explain this document" and "what topics are
+covered" are *global* requests — no single passage resembles them, so similarity
+retrieval has nothing to match and a lookup-only system can only refuse. Queries
+are classified into three paths:
+
+| Intent | Example | How it is answered |
+|---|---|---|
+| `LOOKUP` | "what is the monthly rent?" | retrieve → fuse → rerank → cite |
+| `SUMMARY` | "explain this document", "tl;dr" | a representative spread — one chunk per topic in document order |
+| `TOPICS` | "what topics are covered?" | from document structure, no retrieval at all |
+
+The summary path deliberately does *not* use top-k similarity: it samples across
+the file so an overview covers the whole document instead of over-representing
+whichever section happens to be longest. Its prompt states that the excerpts are a
+sample, so the model cannot imply completeness it does not have.
+
+Classification is rule-based and **typo-tolerant**, built from two independent
+signals — an expository verb plus a whole-document reference — rather than fixed
+phrases. `"explain abput this document"` and `"sumarize this documnt"` both route
+correctly. Queries carrying their own subject stay on the lookup path:
+`"explain BCNF in this document"` is a lookup, `"explain this document"` is not.
+
+Refusals are never dead ends. When the system genuinely cannot answer, it returns
+answerable prompts built from the indexed material's own section headings, and an
+empty chat shows the same starters.
+
+---
+
 ## Study mode — quizzes with a verified answer key
 
 Upload study material and VeriRAG turns it into practice questions. The point of
@@ -269,7 +299,7 @@ tracking and animating from the live presentation value, which Streamlit gives n
 hook for. Rather than fake them, non-gesture UI uses the critically damped motion
 the guidance itself prescribes for anything the user did not throw with momentum.
 
-53 tests in `tests/test_theme.py` assert the design *invariants* — that blur
+64 tests in `tests/test_theme.py` assert the design *invariants* — that blur
 scales with surface size, that translucency is never stacked, that tracking is not
 one value for all sizes, that keyframes touch only compositor-friendly properties,
 and that quoted PDF text is HTML-escaped.
@@ -439,6 +469,25 @@ cell shares its baseline with the other cells of its row. `PdfLine.row_span`
 now records how many text objects sit on a line's baseline, and heading detection
 is skipped for anything in a multi-column row.
 
+**13. The most common question was the one it could not answer.**
+A user uploaded a PDF, typed "explain abput this document", and got a refusal.
+Two independent causes, both fatal on a new user's *first* question: a global
+request has no passage that resembles it, so similarity retrieval finds nothing;
+and one typo removed the last usable term. The lesson was that a retrieval
+pipeline is not a product — "summarise this" needs a different strategy, not a
+better ranker. Fixed with intent classification, a spread-sampling summary path,
+and typo repair against the corpus's own vocabulary. Refusals now carry
+answerable alternatives rather than dead-ending.
+
+**14. Reloading the object is not reloading the class.**
+Editing `src/verirag` while Streamlit ran produced an `AttributeError` for a field
+plainly visible in the dataclass. Streamlit re-executes the app script on rerun
+but never re-imports a loaded package, so caching the engine against a source
+fingerprint rebuilt the *object from the stale class*. The modules themselves have
+to be dropped from `sys.modules`, before the imports bind any names. Worth noting
+as a class of bug: my verification loop (pytest, fresh interpreter) could not
+reproduce what the user hit (long-running server, cached state).
+
 ---
 
 ## Project layout
@@ -457,7 +506,8 @@ src/verirag/
     bm25_store.py        BM25 Okapi — bundled NumPy scorer + rank_bm25 adapter
     indexer.py           orchestration, LineStore, DocumentRegistry, persistence
   retrieval/
-    query_expansion.py   keyword / declarative / synonym / abbreviation variants
+    query_expansion.py   keyword / declarative / synonym / abbreviation variants + typo repair
+    intent.py            classifies lookup vs whole-document summary vs structure
     fusion.py            Reciprocal Rank Fusion + multi-query merge
     reranker.py          LexicalReranker (default) | CrossEncoderReranker
     retriever.py         the pipeline + auditable trace
@@ -476,7 +526,7 @@ src/verirag/
   textnorm.py            punctuation folding used when comparing generated to source text
   ui/theme.py            Apple-inspired design system: tokens, stylesheet, components
   eval/                  golden dataset, metrics, runner
-tests/                   345 tests
+tests/                   420 tests
 app.py                   Streamlit UI
 cli.py                   command line entry point
 ```
@@ -484,7 +534,7 @@ cli.py                   command line entry point
 ## Testing
 
 ```bash
-pytest -q          # 345 tests
+pytest -q          # 420 tests
 ```
 
 Coverage focuses on the parts where a silent failure would be invisible: line
@@ -574,7 +624,7 @@ Stated plainly, because knowing them is part of the work:
 >   failing silently.
 > - Shipped a Streamlit UI with **SQLite-persisted chat history that stores the
 >   evidence alongside each answer**, a CLI, Docker image, CI with metric
->   regression gates, and **345 tests**.
+>   regression gates, and **420 tests**.
 
 ### Questions an interviewer will ask, and where to look
 
