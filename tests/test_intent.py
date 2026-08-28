@@ -85,6 +85,21 @@ class TestClassify:
         """A query carrying its own subject is a lookup, however it is phrased."""
         assert classify(query) is Intent.LOOKUP
 
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "explain about this doc",   # "doc" is 3 letters, below the fuzzy floor
+            "explain this doc",
+            "summarise the doc",
+            "explain the report",
+            "describe this file",
+            "explain the attachment",
+        ],
+    )
+    def test_short_and_alternative_document_nouns(self, query):
+        """Users write "doc", not "document"."""
+        assert classify(query) is Intent.SUMMARY
+
     def test_empty_query(self):
         assert classify("") is Intent.LOOKUP
         assert classify("   ") is Intent.LOOKUP

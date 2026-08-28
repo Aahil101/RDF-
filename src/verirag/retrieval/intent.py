@@ -57,9 +57,13 @@ _EXPOSITORY_VERB_RE = re.compile(
 )
 
 # A reference to the document as a whole rather than to something inside it.
+# Short forms matter: "doc" is three letters, below the length floor that fuzzy
+# matching needs to stay safe, so the common abbreviations are listed explicitly.
 _WHOLE_DOC_NOUN_RE = re.compile(
-    r"\b(document|documents|pdf|pdfs|file|paper|notes?|deed|judgment|judgement|"
-    r"case|material|contents?|everything|all\s+of\s+(?:this|it))\b",
+    r"\b(doc|docs|document|documents|pdf|pdfs|file|files|paper|notes?|deed|"
+    r"judgment|judgement|case|material|contents?|report|letter|contract|agreement|"
+    r"invoice|memo|article|thesis|slides?|deck|attachment|everything|"
+    r"all\s+of\s+(?:this|it))\b",
     re.IGNORECASE,
 )
 
@@ -68,7 +72,7 @@ _TOPICS_RE = re.compile(
     r"\b("
     r"(?:what|which)\s+(?:topics|sections|chapters|clauses)|"
     r"list\s+(?:the\s+)?(?:topics|sections|chapters|clauses)|"
-    r"what(?:'s| is)\s+(?:in|inside|covered)\b|"
+    r"what(?:'s|s)?\s*(?:is)?\s+(?:in|inside|covered)\b|"
     r"what\s+(?:does|do)\s+(?:this|it|the\s+\w+)\s+cover|"
     r"what\s+(?:can|could|should)\s+i\s+ask|"
     r"sections?\s+(?:in|of)\s+(?:this|the)"
@@ -157,7 +161,9 @@ _INTENT_VOCABULARY = frozenset(
     document documents deed judgment judgement case material content contents you your
     something anything much little bit short overview simple simply kindly just now here
     whole entire full complete briefly quickly again rest generally basically main key
-    points point summary gist recap tldr abstract synopsis outline elaborate""".split()
+    points point summary gist recap tldr abstract synopsis outline elaborate
+    doc docs files report letter contract agreement invoice memo article thesis
+    slides deck attachment""".split()
 )
 """Words that express *how* something is asked rather than *what* is asked.
 

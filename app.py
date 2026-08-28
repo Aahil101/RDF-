@@ -22,7 +22,51 @@ from pathlib import Path
 
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+_SRC_ROOT = Path(__file__).resolve().parent / "src" / "verirag"
+sys.path.insert(0, str(_SRC_ROOT.parent))
+
+
+def source_fingerprint() -> str:
+    """Newest modification time across the package source."""
+    try:
+        return str(max(path.stat().st_mtime_ns for path in _SRC_ROOT.rglob("*.py")))
+    except ValueError:  # pragma: no cover - installed wheel, no source tree
+        return "static"
+
+
+def _hot_reload_package() -> None:
+    """Drop ``verirag.*`` from ``sys.modules`` when its source has changed.
+
+    Streamlit re-executes the app script on every rerun but does **not** re-import
+    already-loaded packages. Editing ``src/verirag`` therefore leaves the old class
+    definitions in memory, and the symptom is baffling: an ``AttributeError`` for a
+    field you can plainly see in the dataclass.
+
+    Caching the engine against a source fingerprint is not sufficient — that
+    rebuilds the *object* from the *stale class*. The modules themselves have to
+    go, and this must happen before the imports below bind any names.
+    """
+    fingerprint = source_fingerprint()
+    try:
+        seen = st.session_state.get("_src_fingerprint")
+    except Exception:  # noqa: BLE001 - imported outside a Streamlit run context
+        return
+    if seen == fingerprint:
+        return
+
+    stale = [name for name in sys.modules if name == "verirag" or name.startswith("verirag.")]
+    if stale:
+        for name in stale:
+            del sys.modules[name]
+        # Objects built from the removed classes must not outlive them.
+        for key in ("study_pack", "quiz_submitted", "quiz_answers"):
+            st.session_state.pop(key, None)
+        st.cache_resource.clear()
+
+    st.session_state["_src_fingerprint"] = fingerprint
+
+
+_hot_reload_package()
 
 from verirag.config import get_settings  # noqa: E402
 from verirag.engine import VeriRAG  # noqa: E402
@@ -45,26 +89,6 @@ theme.inject(st)
 # ---------------------------------------------------------------------------
 # resources
 # ---------------------------------------------------------------------------
-_SRC_ROOT = Path(__file__).resolve().parent / "src" / "verirag"
-
-
-def source_fingerprint() -> str:
-    """Fingerprint of the package source, used as part of the cache key.
-
-    Streamlit caches the engine object with ``st.cache_resource``, and it does not
-    re-import an already-loaded package. Editing ``src/verirag`` while the server
-    runs therefore leaves a cached engine built from the *previous* class
-    definition, which surfaces as a baffling ``AttributeError`` for a method you
-    can plainly see in the file. Folding the newest source mtime into the cache
-    key makes the engine rebuild itself instead.
-    """
-    try:
-        newest = max(path.stat().st_mtime_ns for path in _SRC_ROOT.rglob("*.py"))
-    except ValueError:  # pragma: no cover - source tree missing (installed wheel)
-        return "static"
-    return str(newest)
-
-
 @st.cache_resource(show_spinner="Loading index…")
 def load_engine(provider: str, _fingerprint: str) -> VeriRAG:
     settings = get_settings(refresh=True)
