@@ -27,7 +27,15 @@ from ..models import Answer, Citation, RetrievedChunk
 from ..retrieval.retriever import RetrievalResult
 from .citations import sanitize_answer, split_sentences
 from .llm import LLM, describe_provider
-from .prompts import REFUSAL_TOKEN, SYSTEM_PROMPT, build_answer_prompt, build_history_preamble
+from .prompts import (
+    REFUSAL_TOKEN,
+    SUMMARY_SYSTEM,
+    SUMMARY_USER,
+    SYSTEM_PROMPT,
+    build_answer_prompt,
+    build_history_preamble,
+    build_sources_text,
+)
 
 _STOP = frozenset(
     """a an and are as at be by for from has have in is it its of on or shall that the their
@@ -109,6 +117,61 @@ class Answerer:
         )
 
     # ----------------------------------------------------------------- helpers
+    def summarise(self, question: str, retrieval: RetrievalResult, doc_name: str) -> Answer:
+        """Summarise a document from a representative spread of its chunks.
+
+        Separate from :meth:`answer` because the task is different: the excerpts
+        are a *sample* of the whole file rather than the passages most similar to a
+        question, and the prompt has to say so or the model will imply
+        completeness it cannot have.
+        """
+        started = time.perf_counter()
+        items = retrieval.chunks
+        if not items:
+            return Answer(
+                question=question,
+                text=NO_EVIDENCE_MESSAGE,
+                refused=True,
+                provider=describe_provider(self.llm),
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+
+        citations = self._build_citations(items)
+        provider_error = ""
+
+        if self.llm is not None:
+            prompt = SUMMARY_USER.format(doc_name=doc_name, sources=build_sources_text(items, max_chars=900))
+            response = self.llm.complete(SUMMARY_SYSTEM, prompt)
+            if response.ok:
+                text, used = sanitize_answer(response.text.strip(), len(items))
+                provider, model = self.llm.provider, self.llm.model
+                if not used:
+                    text, used = f"{text} [S1]".strip(), [1]
+            else:
+                provider_error = response.error or "empty response from provider"
+                text, used = compose_overview(items, doc_name)
+                provider, model = "extractive-fallback", ""
+        else:
+            text, used = compose_overview(items, doc_name)
+            provider, model = "extractive", ""
+
+        used_set = set(used)
+        for index, citation in enumerate(citations, start=1):
+            citation.used_in_answer = index in used_set
+
+        return Answer(
+            question=question,
+            text=text,
+            citations=citations,
+            provider=provider,
+            model=model,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            weak_evidence=False,  # a spread of the document is the right evidence here
+            retrieval_score=1.0,
+            provider_error=provider_error,
+            retrieval_trace=retrieval.trace(),
+        )
+
     @staticmethod
     def _no_lexical_footprint(question: str, items: Sequence[RetrievedChunk]) -> bool:
         """True when none of the question's content words occur in the evidence.
@@ -171,6 +234,36 @@ class Answerer:
             text = f"{text} [S1]".strip()
             used = [1]
         return text, used, False, ""
+
+
+def compose_overview(items: Sequence[RetrievedChunk], doc_name: str) -> tuple[str, list[int]]:
+    """Build a document overview with no LLM.
+
+    One line per excerpt: its section heading where the document has one, plus the
+    most substantive sentence from it. Crude beside a generated summary, but every
+    line is quoted from the file and carries its own citation — and crucially it
+    answers the question instead of refusing.
+    """
+    lines = [f"{doc_name} contains the following, based on a spread of {len(items)} excerpts:"]
+    used: list[int] = []
+
+    for index, item in enumerate(items, start=1):
+        chunk = item.chunk
+        sentences = [s for s in split_sentences(chunk.body_text) if len(s.split()) >= 5]
+        if not sentences:
+            sentences = [chunk.body_text.strip()]
+        # The longest sentence is usually the substantive one; headings and
+        # fragments are short.
+        best = max(sentences, key=lambda s: len(s.split()))[:260].strip()
+        label = chunk.section.strip().rstrip(".") if chunk.section else f"page {chunk.page_no}"
+        lines.append(f"- {label}: {best.rstrip('.')}. [S{index}]")
+        used.append(index)
+
+    lines.append(
+        "This is assembled from excerpts rather than written as prose. "
+        "Add a free Groq or Gemini key for a fluent summary."
+    )
+    return "\n".join(lines), used
 
 
 # ---------------------------------------------------------------------------

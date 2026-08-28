@@ -271,7 +271,19 @@ class TestEvalHarness:
 
 
 class TestSampleCorpus:
-    """Guards the shipped corpus and its golden labels, when present."""
+    """Guards the shipped corpus and its golden labels, when fully present.
+
+    This reads the *shared* index, which a user can change through the UI by
+    uploading or removing documents. It therefore verifies that the three sample
+    documents are all present before asserting anything, and skips otherwise —
+    a test must not fail because someone legitimately used the application.
+    """
+
+    EXPECTED = {
+        "case_sharma_v_metro_realty.pdf",
+        "lease_deed_greenwood_c704.pdf",
+        "study_notes_dbms_unit3.pdf",
+    }
 
     def test_bundled_dataset_labels_are_valid(self):
         from verirag.config import get_settings
@@ -283,4 +295,10 @@ class TestSampleCorpus:
         engine = VeriRAG(settings, llm=None, probe_llm=False, enable_history=False)
         if engine.is_empty():
             pytest.skip("sample corpus not indexed")
+
+        indexed = {document.name for document in engine.documents()}
+        missing = self.EXPECTED - indexed
+        if missing:
+            pytest.skip(f"shared index does not hold the full sample corpus (missing {sorted(missing)})")
+
         assert validate_dataset(engine, all_cases()) == []

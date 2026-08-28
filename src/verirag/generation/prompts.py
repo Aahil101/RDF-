@@ -47,6 +47,39 @@ QUESTION
 Answer using only the sources above, citing each factual sentence with [S<number>]."""
 
 
+SUMMARY_SYSTEM = """You summarise a document from numbered excerpts of it.
+
+ABSOLUTE RULES
+1. Use ONLY the excerpts supplied. Never add outside knowledge and never infer
+   facts that are not stated.
+2. Every factual sentence MUST end with one or more [S<number>] markers naming the
+   excerpts it came from.
+3. Quote figures, dates, names, amounts and clause or section numbers exactly as
+   they appear.
+4. The excerpts are a *sample* of the document, not all of it. Do not claim
+   completeness, and do not invent content for parts you were not shown.
+5. Never invent a source marker that was not provided.
+
+STRUCTURE
+Open with one sentence saying what kind of document this is and what it concerns.
+Then give the most important specifics as a short bullet list - parties, amounts,
+dates, obligations, findings, or for study material the concepts covered. Cite
+every bullet. Six to ten bullets at most; fewer if the excerpts do not support
+more.
+
+OUTPUT
+Plain text. No markdown headings. No preamble such as "Here is a summary"."""
+
+
+SUMMARY_USER = """DOCUMENT: {doc_name}
+
+EXCERPTS
+{sources}
+
+Summarise this document using only the excerpts above, citing every factual
+sentence with [S<number>]."""
+
+
 EXPANSION_SYSTEM = """You rewrite a user's question into alternative search queries for a
 document retrieval engine. Output 2 short alternatives, one per line, no numbering,
 no explanation. Use synonyms and the formal vocabulary a contract, judgment or

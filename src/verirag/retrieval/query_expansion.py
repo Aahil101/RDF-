@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from typing import Callable, Sequence
 
+from rapidfuzz import fuzz, process
+
 from ..index.embedder import tokenize
 
 _QUESTION_WORDS = frozenset(
@@ -127,12 +129,51 @@ def synonym_form(query: str) -> str:
     return f"{normalise_query(query)} {' '.join(dict.fromkeys(extra))}"
 
 
+def spelling_form(query: str, vocabulary: Sequence[str] | None = None, *, min_score: int = 82) -> str:
+    """Repair out-of-vocabulary words against the indexed corpus.
+
+    A single typo used to be fatal: "abput this document" shares no usable term
+    with anything indexed, so retrieval returned nothing and the system refused a
+    perfectly reasonable question. Correcting query terms against the *corpus's own
+    vocabulary* — rather than a general dictionary — also fixes the more common
+    case of a half-remembered technical term.
+
+    Only words absent from the vocabulary are touched, so correctly spelled terms
+    are never "corrected" into something else.
+    """
+    if not vocabulary:
+        return ""
+
+    known = set(vocabulary)
+    tokens = tokenize(query)
+    if not tokens:
+        return ""
+
+    corrected: list[str] = []
+    changed = False
+    for token in tokens:
+        if len(token) < 4 or token in known or token in _STOP or token in _QUESTION_WORDS:
+            corrected.append(token)
+            continue
+        match = process.extractOne(
+            token, vocabulary, scorer=fuzz.ratio, score_cutoff=min_score
+        )
+        if match:
+            corrected.append(match[0])
+            changed = True
+        else:
+            corrected.append(token)
+
+    return " ".join(corrected) if changed else ""
+
+
 def expand_query(
     query: str,
     *,
     enabled: bool = True,
-    max_variants: int = 4,
+    max_variants: int = 5,
     llm_expand: Callable[[str], Sequence[str]] | None = None,
+    vocabulary: Sequence[str] | None = None,
 ) -> list[str]:
     """Return the query plus up to ``max_variants - 1`` rule-based variants."""
     base = normalise_query(query)
@@ -142,7 +183,13 @@ def expand_query(
         return [base]
 
     variants = [base]
-    for candidate in (keyword_form(base), declarative_form(base), synonym_form(base)):
+    candidates = [
+        spelling_form(base, vocabulary),
+        keyword_form(base),
+        declarative_form(base),
+        synonym_form(base),
+    ]
+    for candidate in candidates:
         if candidate and candidate.lower() != base.lower() and candidate not in variants:
             variants.append(candidate)
 

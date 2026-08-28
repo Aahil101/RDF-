@@ -56,11 +56,25 @@ def _write_pdf(path: Path, pages: list[list[str]]) -> Path:
 
 @pytest.fixture()
 def settings(tmp_path: Path) -> Settings:
+    """Isolated, fast, deterministic settings.
+
+    Every value that the developer's ``.env`` could change is pinned here. Without
+    this the suite silently inherits local configuration — loading a 90 MB neural
+    model per fixture, and passing or failing depending on whose machine it runs
+    on. Tests assert behaviour, so they fix the configuration that behaviour
+    depends on.
+    """
     config = Settings()
     config.data_dir = tmp_path / "data"
     config.llm_provider = "extractive"
+    config.embedder = "hashing"      # no model download, deterministic vectors
+    config.reranker = "lexical"      # no cross-encoder load
+    config.vector_backend = "numpy"
+    config.embed_dim = 384
     config.chunk_target_words = 40
     config.chunk_overlap_lines = 1
+    config.min_retrieval_score = 0.10
+    config.low_confidence_score = 0.35
     return config.ensure_dirs()
 
 

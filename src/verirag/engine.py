@@ -27,8 +27,9 @@ from .config import Settings, get_settings
 from .generation.answerer import Answerer
 from .generation.llm import LLM, describe_provider, get_llm
 from .index.indexer import Indexer, IngestReport
-from .models import Answer, Document
+from .models import Answer, Citation, Document, RetrievedChunk
 from .proof.highlighter import HighlightSpan, ProofImage, ProofRenderer
+from .retrieval.intent import Intent, classify, topic_of_interest
 from .retrieval.retriever import HybridRetriever, RetrievalResult
 from .store.chat_db import ChatDB
 from .verify.grounding import GroundingReport, GroundingVerifier
@@ -44,6 +45,8 @@ class AskResult:
     session_id: str = ""
     message_id: int = 0
     proofs: list[ProofImage] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
+    """Answerable prompts offered when the system declines — never a dead end."""
 
     @property
     def text(self) -> str:
@@ -145,9 +148,28 @@ class VeriRAG:
         render_proof: bool = True,
         persist: bool = True,
     ) -> AskResult:
-        """Answer *question* with verified, span-level evidence."""
+        """Answer *question* with verified, span-level evidence.
+
+        The question is first classified. "Explain this document" and "what topics
+        are covered" are *global* requests: no single passage resembles them, so
+        sending them down the similarity path guarantees a refusal on the most
+        common question a new user asks. They get a representative spread of the
+        document instead.
+        """
         if not question or not question.strip():
             raise ValueError("question must not be empty")
+
+        intent = classify(question)
+        if intent is Intent.TOPICS:
+            return self._answer_topics(question, doc_ids=doc_ids, session_id=session_id, persist=persist)
+        if intent is Intent.SUMMARY:
+            return self._answer_summary(
+                question,
+                doc_ids=doc_ids,
+                session_id=session_id,
+                persist=persist,
+                render_proof=render_proof,
+            )
 
         history: list[tuple[str, str]] = []
         if self.chat is not None and session_id and use_history:
@@ -173,7 +195,222 @@ class VeriRAG:
             session_id=session_id or "",
             message_id=message_id,
             proofs=proofs,
+            suggestions=self.suggestions(doc_ids) if answer.refused else [],
         )
+
+    # ------------------------------------------------------- global requests
+    def _target_documents(self, doc_ids: Sequence[str] | None) -> list[Document]:
+        """Which documents a whole-document request refers to.
+
+        With an explicit filter, that. With one document indexed, that one. With
+        several and no filter, the most recently ingested — "this document" almost
+        always means the one just uploaded — and the answer says which it chose so
+        the guess is visible rather than silent.
+        """
+        documents = self.documents()
+        if not documents:
+            return []
+        if doc_ids:
+            allowed = set(doc_ids)
+            chosen = [d for d in documents if d.doc_id in allowed]
+            if chosen:
+                return chosen
+        if len(documents) == 1:
+            return documents
+        return [max(documents, key=lambda d: d.ingested_at)]
+
+    def _representative_chunks(self, doc_id: str, budget: int = 14) -> list:
+        """A spread across the document, not the top-k most similar to anything.
+
+        One chunk per topic in document order, so a summary covers the whole file
+        rather than over-sampling whichever section happens to be longest.
+        """
+        chunks = [c for c in self.indexer.vectors.all_chunks() if c.doc_id == doc_id]
+        if not chunks:
+            return []
+        chunks.sort(key=lambda c: (c.page_no, c.line_start))
+        if len(chunks) <= budget:
+            return chunks
+
+        from .study import extract_topics
+
+        picked: list = []
+        by_id = {c.chunk_id: c for c in chunks}
+        for topic in extract_topics(chunks):
+            for chunk_id in topic.chunk_ids[:1]:
+                if chunk_id in by_id:
+                    picked.append(by_id[chunk_id])
+        # Top up with an even stride so long documents are still covered.
+        if len(picked) < budget:
+            stride = max(len(chunks) // budget, 1)
+            for chunk in chunks[::stride]:
+                if chunk not in picked:
+                    picked.append(chunk)
+                if len(picked) >= budget:
+                    break
+        picked.sort(key=lambda c: (c.page_no, c.line_start))
+        return picked[:budget]
+
+    def _answer_summary(
+        self,
+        question: str,
+        *,
+        doc_ids: Sequence[str] | None,
+        session_id: str | None,
+        persist: bool,
+        render_proof: bool,
+    ) -> AskResult:
+        targets = self._target_documents(doc_ids)
+        if not targets:
+            return self._empty_result(question, session_id, persist)
+
+        topic = topic_of_interest(question)
+        document = targets[0]
+
+        if topic:
+            # "summarise clause 3" is a scoped request: retrieve for the topic.
+            retrieval = self.retriever.retrieve(
+                topic, top_k=max(self.settings.top_k_final, 8), doc_ids=[document.doc_id]
+            )
+            items = retrieval.chunks
+        else:
+            chunks = self._representative_chunks(document.doc_id)
+            items = [RetrievedChunk(chunk=chunk, score=1.0) for chunk in chunks]
+            retrieval = RetrievalResult(query=question, variants=[question], chunks=items)
+
+        if not items:
+            return self._empty_result(question, session_id, persist)
+
+        answer = self.answerer.summarise(question, retrieval, document.name)
+        if len(targets) == 1 and len(self.documents()) > 1 and not doc_ids:
+            answer.text = f"Summarising **{document.name}**, the most recently added document.\n\n{answer.text}"
+
+        grounding = self.verifier.verify(answer)
+        proofs = self.render_proofs(answer) if render_proof and not answer.refused else []
+
+        message_id = 0
+        if persist and self.chat is not None and session_id:
+            self.chat.add_user_message(session_id, question)
+            message_id = self.chat.add_answer(session_id, answer)
+
+        return AskResult(
+            answer=answer,
+            retrieval=retrieval,
+            grounding=grounding,
+            session_id=session_id or "",
+            message_id=message_id,
+            proofs=proofs,
+        )
+
+    def _answer_topics(
+        self,
+        question: str,
+        *,
+        doc_ids: Sequence[str] | None,
+        session_id: str | None,
+        persist: bool,
+    ) -> AskResult:
+        """Answer "what's in here?" from document structure, not retrieval."""
+        targets = self._target_documents(doc_ids)
+        if not targets:
+            return self._empty_result(question, session_id, persist)
+
+        document = targets[0]
+        topics = self.topics(document.doc_id)
+        if not topics:
+            return self._empty_result(question, session_id, persist)
+
+        chunk_by_id = {c.chunk_id: c for c in self.indexer.vectors.all_chunks()}
+        lines = [f"{document.name} covers {len(topics)} sections across {document.n_pages} page(s):"]
+        citations: list[Citation] = []
+        for index, entry in enumerate(topics, start=1):
+            marker = f"S{index}"
+            lines.append(f"- {entry.name} ({entry.page_range}) [{marker}]")
+            source = next((chunk_by_id[c] for c in entry.chunk_ids if c in chunk_by_id), None)
+            if source is None:
+                continue
+            citations.append(
+                Citation(
+                    marker=marker,
+                    doc_id=source.doc_id,
+                    doc_name=source.doc_name,
+                    page_no=source.page_no,
+                    line_start=source.line_start,
+                    line_end=source.line_end,
+                    quote=source.text,
+                    retrieval_score=1.0,
+                    used_in_answer=True,
+                    bboxes=list(source.line_bboxes),
+                )
+            )
+
+        answer = Answer(
+            question=question,
+            text="\n".join(lines),
+            citations=citations,
+            groundedness=1.0,
+            provider="structure",
+            retrieval_score=1.0,
+        )
+        retrieval = RetrievalResult(query=question, variants=[question], chunks=[])
+
+        message_id = 0
+        if persist and self.chat is not None and session_id:
+            self.chat.add_user_message(session_id, question)
+            message_id = self.chat.add_answer(session_id, answer)
+
+        return AskResult(
+            answer=answer,
+            retrieval=retrieval,
+            grounding=GroundingReport(verdicts=[], groundedness=1.0, supported=0, total=0),
+            session_id=session_id or "",
+            message_id=message_id,
+        )
+
+    def _empty_result(self, question: str, session_id: str | None, persist: bool) -> AskResult:
+        answer = Answer(
+            question=question,
+            text=(
+                "There is nothing indexed to summarise yet. Upload a PDF in the Documents "
+                "tab and index it, then ask again."
+            ),
+            refused=True,
+            provider="structure",
+        )
+        message_id = 0
+        if persist and self.chat is not None and session_id:
+            self.chat.add_user_message(session_id, question)
+            message_id = self.chat.add_answer(session_id, answer)
+        return AskResult(
+            answer=answer,
+            retrieval=RetrievalResult(query=question, variants=[], chunks=[]),
+            grounding=GroundingReport(verdicts=[], groundedness=0.0, supported=0, total=0),
+            session_id=session_id or "",
+            message_id=message_id,
+            suggestions=self.suggestions(None),
+        )
+
+    # -------------------------------------------------------------- wayfinding
+    def suggestions(self, doc_ids: Sequence[str] | None = None, limit: int = 5) -> list[str]:
+        """Questions this corpus can actually answer.
+
+        A bare refusal is a dead end. Every screen should tell the user where they
+        can go next, so a refusal ships with concrete, answerable prompts drawn
+        from the indexed material's own section headings.
+        """
+        targets = self._target_documents(doc_ids) or self.documents()
+        prompts: list[str] = []
+        for document in targets[:2]:
+            for entry in self.topics(document.doc_id):
+                if len(prompts) >= limit:
+                    break
+                name = entry.name.strip().rstrip(".")
+                if len(name) < 4:
+                    continue
+                prompts.append(f"What does the section on {name} say?")
+        if targets:
+            prompts.insert(0, f"Summarise {targets[0].name}")
+        return prompts[:limit]
 
     # -------------------------------------------------------------------- proof
     def render_proofs(self, answer: Answer, *, only_used: bool = True, dpi: int | None = None) -> list[ProofImage]:

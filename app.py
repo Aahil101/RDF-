@@ -102,7 +102,13 @@ def render_citation_card(engine: VeriRAG, citation: Citation, index: int) -> Non
             st.info("Source PDF is no longer at its indexed path, so the page cannot be rendered.")
 
 
-def render_answer(engine: VeriRAG, answer: Answer, *, show_trace: bool) -> None:
+def render_answer(
+    engine: VeriRAG,
+    answer: Answer,
+    *,
+    show_trace: bool,
+    suggestions: list[str] | None = None,
+) -> None:
     st.markdown(answer.text)
     st.markdown(
         theme.confidence_pill(answer.confidence_band(), answer.groundedness, answer.retrieval_score),
@@ -118,6 +124,11 @@ def render_answer(engine: VeriRAG, answer: Answer, *, show_trace: bool) -> None:
         )
 
     if answer.refused:
+        # Never trap the user: a refusal ships with things the corpus can answer.
+        if suggestions:
+            st.markdown("**Try one of these instead**")
+            for prompt in suggestions:
+                st.markdown(theme.list_row(prompt), unsafe_allow_html=True)
         return
 
     if answer.weak_evidence:
@@ -263,12 +274,22 @@ def tab_chat(engine: VeriRAG, session_id: str, show_trace: bool) -> None:
         st.info("Index some documents first — use the sidebar button or the Documents tab.")
         return
 
-    for message in engine.chat.get_messages(session_id):
+    messages = engine.chat.get_messages(session_id)
+    for message in messages:
         with st.chat_message("user" if message.role == "user" else "assistant"):
             if message.role == "user":
                 st.markdown(message.content)
             else:
                 render_answer(engine, message_to_answer(message), show_trace=show_trace)
+
+    # An empty chat is a wayfinding problem: say what can be asked here.
+    if not messages:
+        starters = engine.suggestions(st.session_state.get("doc_filter") or None)
+        if starters:
+            st.markdown("**Try asking**")
+            for prompt in starters:
+                st.markdown(theme.list_row(prompt), unsafe_allow_html=True)
+            st.caption("Or ask anything else about the indexed documents.")
 
     question = st.chat_input("Ask about the indexed documents…")
     if not question:
@@ -284,7 +305,7 @@ def tab_chat(engine: VeriRAG, session_id: str, show_trace: bool) -> None:
             doc_ids=st.session_state.get("doc_filter") or None,
             render_proof=False,  # rendered lazily per citation card
         )
-        render_answer(engine, result.answer, show_trace=show_trace)
+        render_answer(engine, result.answer, show_trace=show_trace, suggestions=result.suggestions)
 
 
 def tab_documents(engine: VeriRAG) -> None:

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from ..config import Settings, get_settings
+from ..index.embedder import tokenize
 from ..index.indexer import Indexer
 from ..models import RetrievedChunk
 from .fusion import merge_multi_query, reciprocal_rank_fusion
@@ -66,6 +67,8 @@ class HybridRetriever:
             self.settings.reranker, model_name=self.settings.rerank_model
         )
         self.llm_expand = llm_expand
+        self._vocab_cache: list[str] | None = None
+        self._vocab_size: int = -1
 
     # -------------------------------------------------------------- retrieval
     def retrieve(
@@ -81,6 +84,7 @@ class HybridRetriever:
             query,
             enabled=self.settings.multi_query,
             llm_expand=self.llm_expand,
+            vocabulary=self._vocabulary(),
         )
         if not variants:
             return RetrievalResult(query=query, variants=[], chunks=[], n_candidates=0)
@@ -108,6 +112,23 @@ class HybridRetriever:
     def _dense(self, query: str) -> list[tuple]:
         vector = self.indexer.embedder.encode([query])[0]
         return self.indexer.vectors.search(vector, self.settings.top_k_dense)
+
+    def _vocabulary(self) -> list[str]:
+        """Distinct terms in the indexed corpus, for typo repair.
+
+        Cached against the chunk count so it is rebuilt after ingestion but not on
+        every query. Correcting against the corpus's own vocabulary beats a general
+        dictionary here: it fixes half-remembered technical terms as well as typos,
+        and never "corrects" a word into something the documents do not contain.
+        """
+        size = len(self.indexer.vectors)
+        if self._vocab_cache is None or self._vocab_size != size:
+            terms: set[str] = set()
+            for chunk in self.indexer.vectors.all_chunks():
+                terms.update(t for t in tokenize(f"{chunk.section} {chunk.text}") if len(t) >= 4)
+            self._vocab_cache = sorted(terms)
+            self._vocab_size = size
+        return self._vocab_cache
 
     # ------------------------------------------------------------------- info
     def describe(self) -> dict[str, object]:
