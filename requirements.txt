@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# VeriRAG runtime dependencies — 100% free / open-source.
+# No paid API is required: local embeddings + local vector store + local BM25.
+# LLM generation uses a FREE-tier HTTP API (Groq / Google Gemini) or local
+# Ollama, and falls back to a zero-key extractive answerer.
+# ---------------------------------------------------------------------------
+
+# --- PDF parsing, rendering + highlight rectangles (span-level proof) -------
+PyMuPDF==1.24.10
+
+# --- numerics / persistence -------------------------------------------------
+numpy==1.26.4
+
+# --- lexical retrieval -----------------------------------------------------
+rank-bm25==0.2.2
+
+# --- fuzzy span matching for grounding verification ------------------------
+rapidfuzz==3.9.7
+
+# --- HTTP client for free-tier LLM providers -------------------------------
+requests==2.32.3
+
+# --- environment configuration --------------------------------------------
+python-dotenv==1.0.1
+
+# --- web UI ---------------------------------------------------------------
+streamlit==1.38.0
+pandas==2.2.2
+
+# --- image handling for highlighted page previews -------------------------
+Pillow==10.4.0
+
+# --- tests ----------------------------------------------------------------
+pytest==8.3.2

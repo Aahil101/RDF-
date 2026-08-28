@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verirag"
+version = "1.0.0"
+description = "Verifiable RAG for PDFs: answers with page + line level proof and visual highlighting"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "VeriRAG" }]
+keywords = ["rag", "llm", "retrieval", "pdf", "citations", "groundedness", "hallucination"]
+dependencies = [
+    "PyMuPDF==1.24.10",
+    "numpy==1.26.4",
+    "rank-bm25==0.2.2",
+    "rapidfuzz==3.9.7",
+    "requests==2.32.3",
+    "python-dotenv==1.0.1",
+    "streamlit==1.38.0",
+    "pandas==2.2.2",
+    "Pillow==10.4.0",
+]
+
+[project.optional-dependencies]
+ml = ["sentence-transformers==3.0.1", "torch==2.4.1", "scikit-learn==1.5.1"]
+dev = ["pytest==8.3.2"]
+
+[project.scripts]
+verirag = "verirag.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 118
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "ARG", "PL"]
+ignore = ["PLR0913", "PLR2004", "PLR0912", "PLR0915", "E501"]

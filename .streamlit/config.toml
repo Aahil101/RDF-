@@ -1,0 +1,26 @@
+# Streamlit's own theme tokens, for the parts CSS cannot reach cleanly: widget
+# internals, dropdown menus, tooltips and the very first paint before our
+# stylesheet loads.
+#
+# `base` is deliberately NOT set. Streamlit then follows the browser's
+# prefers-color-scheme, which is the same signal src/verirag/ui/theme.py keys its
+# dark palette off. Forcing a base here makes Streamlit render light widget
+# chrome underneath dark surfaces (or the reverse) for anyone whose OS disagrees.
+#
+# Keep primaryColor in step with --accent in theme.py.
+
+[theme]
+primaryColor = "#0071e3"   # Apple blue
+font = "sans serif"        # the real stack (Inter first) is applied in CSS
+
+[server]
+headless = true
+fileWatcherType = "auto"
+maxUploadSize = 50         # MB per PDF
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true

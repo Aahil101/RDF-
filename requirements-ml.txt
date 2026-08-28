@@ -1,0 +1,13 @@
+# ---------------------------------------------------------------------------
+# OPTIONAL upgrade: neural embeddings + cross-encoder reranking.
+# Still 100% free (models download once from HuggingFace and run locally
+# on CPU), but ~2 GB of wheels. VeriRAG works fully without this file by
+# using the built-in deterministic TF-IDF/SVD embedder + lexical reranker.
+#
+#   pip install -r requirements-ml.txt
+#   set VERIRAG_EMBEDDER=sentence-transformers
+#   set VERIRAG_RERANKER=cross-encoder
+# ---------------------------------------------------------------------------
+sentence-transformers==3.0.1
+torch==2.4.1
+scikit-learn==1.5.1

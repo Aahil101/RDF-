@@ -1,0 +1,47 @@
+{
+  "provider": "extractive:no-llm",
+  "config": {
+    "embedder": "sentence-transformers",
+    "reranker": "cross-encoder",
+    "bm25": "rank_bm25",
+    "top_k_final": 5,
+    "multi_query": true,
+    "min_retrieval_score": 0.001,
+    "grounding_threshold": 0.42
+  },
+  "n_questions": 53,
+  "n_in_corpus": 45,
+  "n_out_of_corpus": 8,
+  "retrieval": {
+    "recall@1": 0.8444,
+    "recall@3": 0.9778,
+    "recall@5": 1.0,
+    "mrr": 0.9093,
+    "ndcg@5": 0.9323,
+    "precision@5": 0.2222
+  },
+  "answers": {
+    "answer_accuracy": 0.9111,
+    "citation_precision@1": 0.6444,
+    "mean_groundedness": 0.9948
+  },
+  "refusal": {
+    "refusal_recall": 1.0,
+    "refusal_precision": 0.8889,
+    "false_refusal_rate": 0.0222,
+    "ood_flagged_rate": 1.0,
+    "in_corpus_flagged_rate": 0.1778
+  },
+  "latency": {
+    "latency_p50_ms": 2.0,
+    "latency_p95_ms": 3.0,
+    "latency_max_ms": 5.0
+  },
+  "threshold_calibration": {
+    "in_corpus_min_score": 0.0007,
+    "in_corpus_median_score": 0.9776,
+    "out_of_corpus_max_score": 0.0002,
+    "separation": 0.0005,
+    "suggested_threshold": 0.0005
+  }
+}

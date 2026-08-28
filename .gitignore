@@ -1,0 +1,44 @@
+# --- python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# --- tooling --------------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- secrets --------------------------------------------------------------
+.env
+*.key
+
+# --- generated artefacts --------------------------------------------------
+data/index/
+data/uploads/
+data/proof_cache/
+storage/
+*.sqlite3
+*.sqlite3-journal
+*.npz
+
+# --- local run logs -------------------------------------------------------
+*.log
+data/*.log
+
+# --- keep the generated sample corpus out of git; regenerate with:
+#     python -m scripts.make_sample_pdfs
+data/raw/*.pdf
+
+# --- os -------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

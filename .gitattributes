@@ -1,0 +1,22 @@
+# Normalise line endings in the repository to LF, and let each checkout use the
+# platform's native ending. Without this, CI running on both ubuntu-latest and
+# windows-latest sees spurious diffs, and Docker builds pick up CRLF in scripts.
+* text=auto eol=lf
+
+# Windows-only files keep CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary: never touch, never diff.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.npz   binary
+*.sqlite3 binary
+
+# Keep generated reports out of diff noise while staying reviewable.
+benchmarks/*.json -diff
